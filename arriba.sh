@@ -5,15 +5,15 @@
 #SBATCH --time=3:00:00
 #SBATCH --mem=80G
 #SBATCH --job-name=arriba
-#SBATCH --mail-type=ALL
-#SBATCH --output ./log/log.txt
-#SBATCH --mail-user=christian.thomas@ukmuenster.de
+#SBATCH --error ./log/%x_%j.err.txt
+#SBATCH --output ./log/%x_%j.out.txt
 
 ml palma/2019a
 ml GCC/8.2.0-2.31.1
 ml OpenMPI/3.1.3
 ml SAMtools/1.9
 ml R-bundle-Bioconductor/3.9-R-3.6.0
+mkdir -p log
 
 # set arguments
 BASE_DIR=/scratch/tmp/thomachr/arriba/arriba_v2.4.0
