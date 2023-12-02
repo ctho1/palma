@@ -1,2 +1,2 @@
 # palma
-Collection of SLURM scripts for the PALMA-II HPC cluster
+Collection of useful SLURM scripts for various bioinformatic pipelines running on the PALMA-II HPC cluster.
