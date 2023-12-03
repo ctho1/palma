@@ -1,0 +1,74 @@
+---
+title: "Deconvolution"
+output: html_document
+date: "2023-07-24"
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(MeDeCom, LOLA, ggplot2, gridExtra, 
+               pheatmap, RColorBrewer, openxlsx) #FactorViz
+
+path <- "./decomp_folder/FactorViz_outputs"
+load(file=paste0(path,"/ann_C.RData"))
+load(file=paste0(path,"/ann_S.RData"))
+load(file=paste0(path,"/medecom_set.RData"))
+load(file=paste0(path,"/meth_data.RData"))
+```
+
+```{r analysis}
+# Plot parameters
+plotParameters(medecom.set)
+plotParameters(medecom.set, K=5)
+
+# Set K and lambda
+K=5
+lambda=0.01
+
+# Get LMCs
+lmcs<-getLMCs(medecom.set, K=K, lambda=lambda)
+
+# Clustering
+plotLMCs(medecom.set, K=K, lambda=lambda, type="dendrogram", n.most.var = 5000)
+plotLMCs(medecom.set, K=K, lambda=lambda, type="MDS", n.most.var = 5000)
+
+# Get LMC Proportions
+prop<-getProportions(medecom.set, K=K, lambda=lambda)
+ann.S<-cbind(ann.S,t(prop))
+
+# Heatmap
+cg_subset <- 1
+traits <- c("LUMP_estimate")
+s.id.col <- "sample_id"
+max.val <- 1
+min.val <- 0
+
+contris <- as.data.frame(getProportions(medecom.set,K=K,lambda=lambda,cg_subset=cg_subset))
+colnames(contris) <- ann.S[,s.id.col]
+if(is.null(max.val)){
+  max.val <- max(apply(contris,1,max))
+}
+if(is.null(min.val)){
+  min.val <- min(apply(contris,1,min))
+}
+breaksList <- seq(min.val,max.val,by=0.01)
+sel.traits <- data.frame(LUMP=ann.S[,"LUMP_estimate"],
+                         Array=ann.S[,"array"])
+
+row.names(sel.traits) <- ann.S[,s.id.col]
+ann.cols <- list(Array = c("450K"="navyblue",
+                           "EPIC"="goldenrod"))
+
+pdf("Heatmap.pdf", width=14, height=8)
+pheatmap(contris,
+         annotation_col = sel.traits,
+         cluster_rows = FALSE,
+         show_colnames = TRUE,
+         breaks=breaksList, 
+         annotation_colors = ann.cols, 
+         color = colorRampPalette(brewer.pal(n = 7, name = "YlOrRd"))(length(breaksList)),
+         cluster_distance_cols="euclidean",
+         clustering_method="average")
+dev.off()
+
+```
+
