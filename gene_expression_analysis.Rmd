@@ -1,0 +1,264 @@
+---
+title: "gene_expression"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(DESeq2, pheatmap, RColorBrewer, openxlsx,
+               ggplot2, tximport, EnsDb.Hsapiens.v86, sva,
+               ggforce, ggrepel, dplyr, rjson, limma, reshape2,
+               ggpubr, DT)
+
+anno <- read.xlsx("sample_sheet.xlsx")
+varnames <- c("Donor","Condition")
+comparisons <- list(comp1 = c("Condition", "24h Myelin", "6h Myelin"),
+                    comp2 = c("Condition", "24h Myelin", "M0"),
+                    comp3 = c("Condition", "24h Myelin", "M1"),
+                    comp4 = c("Condition", "24h Myelin", "M2"),
+                    comp5 = c("Condition", "6h Myelin", "M0"),
+                    comp6 = c("Condition", "6h Myelin", "M1"),
+                    comp7 = c("Condition", "6h Myelin", "M2"),
+                    comp8 = c("Condition", "M0", "M1"),
+                    comp9 = c("Condition", "M0", "M2"),
+                    comp10 = c("Condition", "M1", "M2"))
+  
+table(anno)
+
+```
+
+## RNA-Seq Analysis
+
+Transcript-level expression was quantified from the raw fastq files using the Salmon software package (v1.10). Downstream analyses were performed in the R environment (version 4.3.0). Gene-level summarization of counts and combination of all sample data was carried out with tximport (v1.28) and the tximport list was transformed into a DESeqDataSet with DESeq2 (v1.40.1). A gene with 10 or more counts was considered expressed. Raw counts were transformed using variance stabilizing transformations (VST) function of DESeq2. 
+
+```{r load_data, include=TRUE}
+dir <- "./salmon"
+subfolders <- list.files(dir)
+files <- file.path(dir, subfolders, "quant.sf")
+names(files) <- subfolders
+
+qc_files <- file.path(dir, subfolders, "lib_format_counts.json")
+qc <- list()
+for(i in 1:length(qc_files)){
+  tmp <- fromJSON(file = qc_files[i])
+  qc[[i]] <- tmp$num_compatible_fragments
+}
+qc <- unlist(qc)
+summary(qc)
+
+txdb <- EnsDb.Hsapiens.v86
+k <- keys(txdb, keytype = "GENENAME")
+df <- ensembldb::select(txdb, keys = k, keytype = "GENENAME", columns = "TXNAME")
+tx2gene <- df[, 2:1]  # tx ID, then gene ID
+
+txi <- tximport(files, type = "salmon", tx2gene = tx2gene, ignoreTxVersion = T)
+
+formula <- as.formula(paste0("~ ", paste(varnames[1],varnames[2], sep = " + ")))
+
+dds <- DESeqDataSetFromTximport(txi, anno, formula)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+vsd <- vst(dds, blind=FALSE)
+
+summary(colSums(assay(dds)))
+is_expressed <- assay(dds) >= 10
+tmp <- data.frame(sample=anno[,1],
+                  expressed_genes<-colSums(is_expressed))
+summary(tmp$expressed_genes....colSums.is_expressed.)
+
+average <- round(mean(tmp$expressed_genes....colSums.is_expressed.),0)
+min <- round(min(tmp$expressed_genes....colSums.is_expressed.),0)
+max <- round(max(tmp$expressed_genes....colSums.is_expressed.),0)
+
+dds <- estimateSizeFactors(dds)
+ncounts <- as.data.frame(round(counts(dds, normalized = TRUE),0))
+ncounts <- cbind(gene=rownames(ncounts),ncounts)
+write.xlsx(ncounts, file="normalized_counts.xlsx")
+```
+
+On average, `r average` expressed genes were detected per sample (range, `r min` - `r max`).
+
+```{r unsupervised_analysis}
+pcaData <- plotPCA(vsd, intgroup=c(varnames), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+cols <- brewer.pal(12, "Set3")[1:length(unique(anno[,2]))]
+names(cols) <- unique(sort(anno[,2]))
+
+ggplot(pcaData, aes(x = PC1, y = PC2, color = pcaData[,4], shape= pcaData[,5])) +
+  geom_point(size =3) +
+  #scale_color_manual(values=cols) +
+  #geom_text_repel(label=pcaData$condition, size=2.5) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1),
+        legend.position="right", legend.box="vertical", legend.margin=margin()) +
+  guides(color=guide_legend(title=varnames[1]),
+         shape=guide_legend(title=varnames[2]))
+
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+rownames(sampleDistMatrix) <- paste(anno[,1])
+colnames(sampleDistMatrix) <- paste(anno[,1])
+annotation <- data.frame(anno[,c(2:3)])
+row.names(annotation) <- colnames(sampleDistMatrix)
+
+var1 <- c(brewer.pal(8, "Set3")[1:length(unique(anno[,2]))])
+var2 <- c(brewer.pal(8, "Set1")[1:length(unique(anno[,3]))])
+names(var1) <- unique(anno[,2])
+names(var2) <- unique(anno[,3])
+
+anno_cols <- list(var1, var2)
+names(anno_cols) <- c(varnames[1], varnames[2])
+
+pheatmap(sampleDistMatrix,
+         clustering_method = "average",
+         show_colnames = FALSE,
+         show_rownames = FALSE,
+         annotation = annotation,
+         annotation_colors = anno_cols,
+         name = "distance",
+         color =  colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+
+```
+
+```{r differential_gene_expression}
+dds <- DESeq(dds)
+resultsNames(dds)
+
+for(i in 1:length(comparisons)){
+  print(paste0(comparisons[[i]][2], " vs. ", comparisons[[i]][3]))
+  
+  res <- results(dds, contrast=comparisons[[i]])
+  summary(res, alpha=0.05)
+  resOrdered <- as.data.frame(res[order(res$pvalue),])
+  resOrdered_sig <- na.omit(resOrdered[resOrdered$padj<0.05,])
+  resOrdered_sig$gene <- rownames(resOrdered_sig)
+
+  write.xlsx(resOrdered_sig[1:500,], paste0(comparisons[[i]][2], " vs. ", comparisons[[i]][3],".xlsx"))
+
+  resLFC <- lfcShrink(dds, contrast=comparisons[[i]], type="normal")
+  DESeq2::plotMA(resLFC, alpha=0.05, colSig="red",
+                 main=paste0(comparisons[[i]][2], " vs. ", comparisons[[i]][3]))
+}
+
+
+```
+
+```{r heatmaps}
+dds <- estimateSizeFactors(dds)
+ncounts <- counts(dds, normalized = TRUE)
+
+genes_of_interest <- read.xlsx("./Macro31_RNASeq_GeneList_Vgl.xlsx", sheet = 2)
+comp <- unique(genes_of_interest$Comparison)
+p <- list()
+
+for(i in 1:length(unique(genes_of_interest$Comparison))){
+  #intersect <- intersect(genes_of_interest$Genes,rownames(ncounts))
+  mat <- ncounts[na.omit(genes_of_interest[which(genes_of_interest$Comparison %in% comp[i]),2]),]
+  order <- order(anno$Condition)
+  mat <- mat[,order]
+  annotation <- data.frame(anno[order,c(2:3)])
+  row.names(annotation) <- colnames(mat)
+  var1 <- c(brewer.pal(8, "Accent")[1:length(unique(anno[,2]))])
+  var2 <- c(brewer.pal(8, "Set1")[1:length(unique(anno[,3]))])
+  names(var1) <- unique(anno[,2])
+  names(var2) <- unique(anno[,3])
+  anno_cols <- list(var1, var2)
+  names(anno_cols) <- c(varnames[1], varnames[2])
+  if(i > 0){
+      p[[i]] <- pheatmap(mat,
+         color = colorRampPalette(c("darkblue","white","yellow"))(255),
+         show_colnames = FALSE,
+         show_rownames = FALSE,
+         cluster_cols = FALSE,
+         border_color = NA,
+         annotation = annotation,
+         annotation_colors = anno_cols,
+         clustering_distance_cols = "euclidean",
+         name = "expression",
+         main = comp[i],
+         scale="row")
+  } 
+  if(i > 99){
+        p[[i]] <- pheatmap(mat,
+         color = colorRampPalette(c("darkblue","white","yellow"))(255),
+         show_colnames = FALSE,
+         show_rownames = FALSE,
+         border_color = NA,
+         cluster_cols = FALSE,
+         clustering_distance_cols = "euclidean",
+         name = "expression", 
+         main = comp[i],
+         scale="row")
+  }
+}
+
+library(gridExtra)
+grid.arrange(grobs = list(p[[1]][[4]], 
+                          p[[2]][[4]],
+                          p[[3]][[4]],
+                          p[[4]][[4]],
+                          p[[5]][[4]],
+                          p[[6]][[4]],
+                          p[[7]][[4]],
+                          p[[8]][[4]]), 
+             ncol = 2)
+
+
+
+library(reshape2)
+dfm <- melt(mat)
+head(dfm)
+
+
+library(ggpubr)
+jpeg("./plots/sasp_genes_comparison.jpeg", width = 13, height = 10, units = 'in', res = 500, quality = 90)
+ggboxplot(dfm, x ="age", y = "value",
+          fill ="age", palette = "npg", notch = FALSE,
+          title=paste0("Normalized Expression Values")) +
+  #scale_y_continuous() +
+  geom_point() +
+  facet_wrap(~Var1, scales = "free_y")+
+  ylab("normalized counts")+xlab("") +
+  stat_compare_means(method = 'anova', vjust=0.8)
+dev.off()
+
+results_comparison <- compare_means(value ~ age, dfm, group.by = c("Var1"),method="anova")
+results_sig <- results_comparison[results_comparison$p < 0.05, ]
+
+dfm1 <- dfm[dfm$Var1 %in% results_sig$Var1,]
+jpeg("./plots/sasp_genes_comparison_only_sig.jpeg", width = 12, height = 9, units = 'in', res = 400, quality = 90)
+ggboxplot(dfm1, x ="age", y = "value",
+          fill ="age", palette = "npg", notch = FALSE,
+          title=paste0("Normalized Expression Values")) +
+  #scale_y_continuous() +
+  geom_point() +
+  facet_wrap(~Var1, scales = "free_y")+
+  ylab("normalized counts")+xlab("") +
+  stat_compare_means(method = 'anova', label.y.npc = 0.95)
+dev.off()
+
+annotation <- data.frame('Age'=dds_ol$Age_Group)
+row.names(annotation) <- colnames(mat)
+anno_cols <- list('Age'=c("neonatal"="#62B2FF",
+                          "adult"="#C000C0",
+                          "old"="#65AE65"))
+
+library(pheatmap)
+jpeg("./plots/Heatmap_SASP_genes.jpeg", width = 6, height = 5, units = 'in', res = 600, quality = 90)
+pheatmap(mat,
+         color = colorRampPalette(c("darkblue","white","yellow"))(255),
+         show_colnames = FALSE,
+         show_rownames = TRUE,
+         annotation = annotation,
+         annotation_colors = anno_cols,
+         clustering_distance_cols = "euclidean",
+         name = "expression",
+         scale="row")
+dev.off()
+```
+
