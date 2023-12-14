@@ -1,3 +1,4 @@
+.libPaths('/scratch/tmp/thomachr/software/R/')
 library(ACE)
 
 args = commandArgs(trailingOnly=TRUE)
