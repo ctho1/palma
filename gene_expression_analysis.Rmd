@@ -106,10 +106,10 @@ colnames(sampleDistMatrix) <- paste(anno[,1])
 annotation <- data.frame(anno[,c(2:3)])
 row.names(annotation) <- colnames(sampleDistMatrix)
 
-var1 <- c(brewer.pal(8, "Set3")[1:length(unique(anno[,2]))])
-var2 <- c(brewer.pal(8, "Set1")[1:length(unique(anno[,3]))])
-names(var1) <- unique(anno[,2])
-names(var2) <- unique(anno[,3])
+var1 <- c(brewer.pal(8, "Dark1")[1:length(unique(anno[,varnames[1]]))])
+var2 <- c(brewer.pal(8, "Set1")[1:length(unique(anno[,varnames[2]]))])
+names(var1) <- unique(anno[,varnames[1]])
+names(var2) <- unique(anno[,varnames[2]])
 
 anno_cols <- list(var1, var2)
 names(anno_cols) <- c(varnames[1], varnames[2])
@@ -120,8 +120,7 @@ pheatmap(sampleDistMatrix,
          show_rownames = FALSE,
          annotation = annotation,
          annotation_colors = anno_cols,
-         name = "distance",
-         color =  colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+         name = "distance")
 
 ```
 
